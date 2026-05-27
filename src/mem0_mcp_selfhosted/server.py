@@ -79,6 +79,10 @@ def _resolve_config_class(provider_name: str) -> type | None:
         from mem0.configs.llms.ollama import OllamaConfig
 
         return OllamaConfig
+    if provider_name == "openai":
+        from mem0.configs.llms.openai import OpenAIConfig
+
+        return OpenAIConfig
     if provider_name in ("anthropic", "anthropic_oat"):
         from mem0_mcp_selfhosted.llm_anthropic import AnthropicOATConfig
 
@@ -144,6 +148,26 @@ def _ensure_memory() -> Any:
             return None
 
     return memory
+
+
+def _merge_scope_filters(
+    *,
+    user_id: str | None,
+    agent_id: str | None,
+    run_id: str | None,
+    extra_filters: dict | None = None,
+) -> dict[str, Any]:
+    """Build mem0 v2-compatible filters by merging scope + caller filters."""
+    merged: dict[str, Any] = {}
+    if user_id:
+        merged["user_id"] = user_id
+    if agent_id:
+        merged["agent_id"] = agent_id
+    if run_id:
+        merged["run_id"] = run_id
+    if extra_filters:
+        merged.update(extra_filters)
+    return merged
 
 
 def _create_server() -> FastMCP:
@@ -235,15 +259,17 @@ def _register_tools(mcp: FastMCP) -> None:
         """Semantic search across existing memories."""
         uid = user_id or get_default_user_id()
 
-        kwargs: dict[str, Any] = {"user_id": uid, "query": query}
-        if agent_id:
-            kwargs["agent_id"] = agent_id
-        if run_id:
-            kwargs["run_id"] = run_id
-        if filters:
-            kwargs["filters"] = filters
+        kwargs: dict[str, Any] = {"query": query}
+        scope_filters = _merge_scope_filters(
+            user_id=uid,
+            agent_id=agent_id,
+            run_id=run_id,
+            extra_filters=filters,
+        )
+        if scope_filters:
+            kwargs["filters"] = scope_filters
         if limit is not None:
-            kwargs["limit"] = limit
+            kwargs["top_k"] = limit
         if threshold is not None:
             kwargs["threshold"] = threshold
         if rerank is not None:
@@ -266,13 +292,17 @@ def _register_tools(mcp: FastMCP) -> None:
         """Page through memories using filters instead of search."""
         uid = user_id or get_default_user_id()
 
-        kwargs: dict[str, Any] = {"user_id": uid}
-        if agent_id:
-            kwargs["agent_id"] = agent_id
-        if run_id:
-            kwargs["run_id"] = run_id
+        kwargs: dict[str, Any] = {}
+        scope_filters = _merge_scope_filters(
+            user_id=uid,
+            agent_id=agent_id,
+            run_id=run_id,
+            extra_filters=None,
+        )
+        if scope_filters:
+            kwargs["filters"] = scope_filters
         if limit is not None:
-            kwargs["limit"] = limit
+            kwargs["top_k"] = limit
 
         mem = _ensure_memory()
         if mem is None:
